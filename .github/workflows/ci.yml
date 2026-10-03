@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - name: vet
+        run: go vet ./...
+      - name: unit tests
+        run: go test ./...
+      - name: smoke — trace a real child (ptrace)
+        run: |
+          go build -o procscope ./cmd/procscope
+          ./procscope trace --filter 'syscall=open*' -- /bin/cat /etc/hostname > /tmp/trace.jsonl
+          head -c 400 /tmp/trace.jsonl
+          grep -q '"name":"openat"' /tmp/trace.jsonl && echo "openat captured"
+      - name: smoke — process tree
+        run: ./procscope ps | head -5
+      - name: smoke — dashboard serves (static check)
+        run: |
+          go build -o procscope ./cmd/procscope
+          timeout 3 ./procscope replay --file testdata/session.jsonl --addr :18080 &
+          sleep 1
+          curl -s http://localhost:18080/ | grep -q ProcScope && echo "dashboard HTML ok"
+          curl -s http://localhost:18080/tree | grep -q pid && echo "tree ok"
+          curl -s http://localhost:18080/app.js | grep -q ProcScope && echo "assets ok"
